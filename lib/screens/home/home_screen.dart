@@ -7,6 +7,8 @@ import '../sorteos/sorteos_screen.dart';
 import '../eventos/eventos_screen.dart';
 import '../reportes/reportes_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../galeria/galeria_screen.dart';
+import '../podcasts/podcasts_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -73,7 +75,9 @@ class HomeScreen extends StatelessWidget {
               leading: const Icon(Icons.facebook, color: Colors.blue),
               title: const Text("Facebook"),
               onTap: () {
-                _openUrl("https://www.facebook.com/");
+                _openUrl(
+                  "https://www.facebook.com/RadioTvEstacionLlacctany/",
+                );
               },
             ),
 
@@ -81,7 +85,9 @@ class HomeScreen extends StatelessWidget {
               leading: const Icon(Icons.music_note, color: Colors.white),
               title: const Text("TikTok"),
               onTap: () {
-                _openUrl("https://www.tiktok.com/");
+                _openUrl(
+                  "https://www.tiktok.com/@radioestacionllacctany",
+                );
               },
             ),
 
@@ -89,7 +95,9 @@ class HomeScreen extends StatelessWidget {
               leading: const Icon(Icons.play_circle, color: Colors.red),
               title: const Text("YouTube"),
               onTap: () {
-                _openUrl("https://www.youtube.com/");
+                _openUrl(
+                  "https://www.youtube.com/@RadioEstacionLlacctany",
+                );
               },
             ),
 
@@ -97,7 +105,9 @@ class HomeScreen extends StatelessWidget {
               leading: const Icon(Icons.phone, color: Colors.green),
               title: const Text("WhatsApp"),
               onTap: () {
-                _openUrl("https://wa.me/51999999999");
+                _openUrl(
+                  "https://wa.me/51999566101?text=Hola%20Radio%20TV%20Estaci%C3%B3n%20Llacctany",
+                );
               },
             ),
             ListTile(
@@ -107,6 +117,7 @@ class HomeScreen extends StatelessWidget {
             ),
           ],
         ),
+
       ),
 
       body: SingleChildScrollView(
@@ -251,13 +262,13 @@ class HomeScreen extends StatelessWidget {
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const SorteosScreen()),
+                      MaterialPageRoute(builder: (_) => const GaleriaScreen()),
                     );
                   },
                   child: const FeatureCard(
-                    icon: Icons.card_giftcard,
-                    title: "Sorteos",
-                    color: Colors.amber,
+                    icon: Icons.photo_library,
+                    title: "Galería",
+                    color: Colors.purple,
                   ),
                 ),
 
@@ -309,10 +320,20 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ),
 
-                const FeatureCard(
-                  icon: Icons.mic,
-                  title: "Podcasts",
-                  color: Colors.pink,
+                GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const PodcastsScreen(),
+                      ),
+                    );
+                  },
+                  child: const FeatureCard(
+                    icon: Icons.mic,
+                    title: "Podcasts",
+                    color: Colors.pink,
+                  ),
                 ),
               ],
             ),

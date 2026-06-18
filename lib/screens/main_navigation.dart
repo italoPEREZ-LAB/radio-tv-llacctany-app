@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'home/home_screen.dart';
+import 'radio/radio_screen.dart';
+import 'podcasts/podcasts_screen.dart';
+import 'perfil/perfil_screen.dart';
+import 'comunidad/comunidad_screen.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
@@ -14,10 +18,10 @@ class _MainNavigationState extends State<MainNavigation> {
 
   final List<Widget> screens = const [
     HomeScreen(),
-    CenterScreen(title: "Radio en Vivo", icon: Icons.radio),
-    CenterScreen(title: "Comunidad", icon: Icons.groups),
-    CenterScreen(title: "Podcasts", icon: Icons.mic),
-    CenterScreen(title: "Perfil", icon: Icons.person),
+    RadioScreen(),
+    ComunidadScreen(),
+    PodcastsScreen(),
+    PerfilScreen(),
   ];
 
   @override
