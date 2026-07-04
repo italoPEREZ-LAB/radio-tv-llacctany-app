@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/app_theme.dart';
-import 'screens/main_navigation.dart';
+import 'screens/home/home_radio_live_screen.dart';
 
 void main() {
   runApp(const RadioLlacctanyApp());
@@ -21,7 +21,7 @@ class RadioLlacctanyApp extends StatelessWidget {
 
       theme: AppTheme.darkTheme,
 
-      home: const MainNavigation(),
+      home: const HomeRadioLiveScreen(),
     );
   }
 }
