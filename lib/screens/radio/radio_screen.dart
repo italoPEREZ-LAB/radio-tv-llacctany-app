@@ -2,7 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:just_audio_background/just_audio_background.dart';
+
+import '../../services/audio_player_service.dart';
 
 class RadioScreen extends StatefulWidget {
   const RadioScreen({super.key});
@@ -12,9 +13,13 @@ class RadioScreen extends StatefulWidget {
 }
 
 class _RadioScreenState extends State<RadioScreen> {
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayerService _audioService =
+      AudioPlayerService.instance;
 
-  // Colocaremos aquí la URL real de AzuraCast.
+  AudioPlayer get _player => _audioService.player;
+
+  // URL temporal de streaming.
+  // Posteriormente colocaremos la URL real de AzuraCast.
   static const String streamUrl =
       'https://ice1.somafm.com/groovesalad-128-mp3';
 
@@ -23,12 +28,17 @@ class _RadioScreenState extends State<RadioScreen> {
 
   bool get _hasStream => streamUrl.trim().isNotEmpty;
 
+  bool get _radioActiva =>
+      _audioService.isRadio &&
+      _audioService.currentUrl == streamUrl &&
+      _player.playing;
+
   @override
   void dispose() {
-    _player.dispose();
+    // No destruimos el reproductor compartido.
+    // Debe continuar disponible para Radio y Podcasts.
     super.dispose();
   }
-
 
   Future<void> _togglePlayback() async {
     if (_isConnecting) return;
@@ -42,8 +52,8 @@ class _RadioScreenState extends State<RadioScreen> {
       return;
     }
 
-    if (_player.playing) {
-      await _player.pause();
+    if (_radioActiva) {
+      await _audioService.pausar();
       return;
     }
 
@@ -53,24 +63,11 @@ class _RadioScreenState extends State<RadioScreen> {
     });
 
     try {
-      if (_player.audioSource == null) {
-        final source = AudioSource.uri(
-          Uri.parse(streamUrl),
-          tag: MediaItem(
-            id: streamUrl,
-            title: 'Radio de prueba - Groove Salad',
-            artist: 'SomaFM',
-            album: 'Prueba técnica de Radio Llacctany',
-            isLive: true,
-          ),
-        );
-
-        await _player.setAudioSource(source);
-      }
-
-      // Inicia la reproducción sin esperar a que
-      // termine una transmisión en vivo.
-      _player.play();
+      await _audioService.reproducirRadio(
+        url: streamUrl,
+        titulo: 'Radio de prueba - Groove Salad',
+        artista: 'SomaFM',
+      );
     } catch (e) {
       if (!mounted) return;
 
@@ -87,7 +84,6 @@ class _RadioScreenState extends State<RadioScreen> {
       }
     }
   }
-
 
   Future<void> _openFacebook() async {
     final uri = Uri.parse(
@@ -109,10 +105,10 @@ class _RadioScreenState extends State<RadioScreen> {
   }
 
   Widget _infoTile(
-      IconData icon,
-      String title,
-      String subtitle,
-      ) {
+    IconData icon,
+    String title,
+    String subtitle,
+  ) {
     return Card(
       color: const Color(0xFF1B1B2F),
       child: ListTile(
@@ -140,7 +136,7 @@ class _RadioScreenState extends State<RadioScreen> {
               radius: 70,
               backgroundColor: Colors.white,
               backgroundImage:
-              AssetImage('assets/images/logo_radio.jpg'),
+                  AssetImage('assets/images/logo_radio.jpg'),
             ),
 
             const SizedBox(height: 20),
@@ -201,13 +197,16 @@ class _RadioScreenState extends State<RadioScreen> {
                     builder: (context, snapshot) {
                       final state = snapshot.data;
 
-                      final playing = state?.playing ?? false;
-                      final processing =
-                          state?.processingState;
+                      final playing = _radioActiva;
+
+                      final processing = state?.processingState;
 
                       final loading = _isConnecting ||
-                          processing == ProcessingState.loading ||
-                          processing == ProcessingState.buffering;
+                          (_audioService.isRadio &&
+                              (processing ==
+                                      ProcessingState.loading ||
+                                  processing ==
+                                      ProcessingState.buffering));
 
                       String status;
 
