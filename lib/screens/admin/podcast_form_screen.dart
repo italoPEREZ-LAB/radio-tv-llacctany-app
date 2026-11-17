@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/podcasts_service.dart';
 import '../../services/podcasts_storage_service.dart';
+import '../../services/podcasts_portadas_service.dart';
 
 class PodcastFormScreen extends StatefulWidget {
   final Map<String, dynamic>? podcast;
@@ -25,6 +26,7 @@ class _PodcastFormScreenState extends State<PodcastFormScreen> {
 
   final _podcastsService = PodcastsService();
   final _storageService = PodcastsStorageService();
+  final _portadasService = PodcastsPortadasService();
 
   final _tituloController = TextEditingController();
   final _descripcionController = TextEditingController();
@@ -34,11 +36,17 @@ class _PodcastFormScreenState extends State<PodcastFormScreen> {
 
   // Audios nuevos subidos durante esta sesión.
   final Set<String> _audiosTemporales = {};
+  // Portadas nuevas subidas durante esta sesión.
+final Set<String> _portadasTemporales = {};
+
+bool _subiendoPortada = false;
+String? _nombrePortadaSeleccionada;
 
   DateTime _fechaPublicacion = DateTime.now();
 
   bool _publicado = false;
   bool _guardando = false;
+  bool _podcastYaGuardado = false;
   bool _subiendoAudio = false;
   bool _saliendo = false;
   bool _permitirSalida = false;
@@ -48,7 +56,10 @@ class _PodcastFormScreenState extends State<PodcastFormScreen> {
   bool get _esEdicion => widget.podcast != null;
 
   bool get _ocupado =>
-      _guardando || _subiendoAudio || _saliendo;
+    _guardando ||
+    _subiendoAudio ||
+    _subiendoPortada ||
+    _saliendo;
 
   @override
   void initState() {
@@ -154,7 +165,20 @@ class _PodcastFormScreenState extends State<PodcastFormScreen> {
     }
 
     return errores;
+  }Future<List<String>> _limpiarPortadasTemporales() async {
+  final errores = <String>[];
+
+  for (final url in _portadasTemporales.toList()) {
+    try {
+      await _portadasService.eliminarPortadaTemporal(url);
+      _portadasTemporales.remove(url);
+    } catch (error) {
+      errores.add(error.toString());
+    }
   }
+
+  return errores;
+}
 
   // Se ejecuta al pulsar Atrás o Cancelar.
   Future<void> _cancelarFormulario() async {
@@ -164,7 +188,13 @@ class _PodcastFormScreenState extends State<PodcastFormScreen> {
       _saliendo = true;
     });
 
-    final errores = await _limpiarAudiosTemporales();
+    final erroresAudio = await _limpiarAudiosTemporales();
+final erroresPortadas = await _limpiarPortadasTemporales();
+
+final errores = [
+  ...erroresAudio,
+  ...erroresPortadas,
+];
 
     if (!mounted) return;
 
@@ -174,10 +204,10 @@ class _PodcastFormScreenState extends State<PodcastFormScreen> {
       });
 
       _mostrarMensaje(
-        'No se pudieron limpiar todos los MP3. '
-        'Verifica la conexión e intenta regresar nuevamente. '
-        'Detalle: ${errores.first}',
-      );
+  'No se pudieron limpiar todos los archivos temporales. '
+  'Verifica la conexión e intenta regresar nuevamente. '
+  'Detalle: ${errores.first}',
+);
 
       return;
     }
@@ -187,7 +217,7 @@ class _PodcastFormScreenState extends State<PodcastFormScreen> {
       _saliendo = false;
     });
 
-    Navigator.of(context).pop(false);
+    Navigator.of(context).pop(_podcastYaGuardado);
   }
 
   Future<void> _seleccionarAudio() async {
@@ -256,95 +286,185 @@ class _PodcastFormScreenState extends State<PodcastFormScreen> {
     }
   }
 
-  Future<void> _guardarPodcast() async {
-    if (_ocupado) return;
+Future<void> _seleccionarPortada() async {
+  if (_ocupado) return;
 
-    if (!_formKey.currentState!.validate()) {
+  try {
+    final archivos = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png'],
+    );
+
+    if (archivos.isEmpty) return;
+
+    final archivo = archivos.first;
+    final nombre = archivo.name.toLowerCase();
+
+    if (!nombre.endsWith('.jpg') &&
+        !nombre.endsWith('.jpeg') &&
+        !nombre.endsWith('.png')) {
+      throw Exception(
+        'Selecciona una imagen JPG, JPEG o PNG.',
+      );
+    }
+
+    final ruta = archivo.path;
+
+    if (ruta == null || ruta.isEmpty) {
+      throw Exception(
+        'No se pudo obtener la ruta de la imagen.',
+      );
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _subiendoPortada = true;
+      _nombrePortadaSeleccionada = archivo.name;
+    });
+
+    final bytes = await File(ruta).readAsBytes();
+
+    final url = await _portadasService.subirPortada(
+      archivo: bytes,
+      nombreArchivo: archivo.name,
+    );
+
+    // Registrar la portada como temporal.
+    _portadasTemporales.add(url);
+
+    if (!mounted) return;
+
+    setState(() {
+      _imagenController.text = url;
+    });
+
+    _mostrarMensaje(
+      'Portada subida correctamente a Supabase.',
+    );
+  } catch (error) {
+    _mostrarMensaje(
+      'No se pudo subir la portada: $error',
+    );
+  } finally {
+    if (mounted) {
+      setState(() {
+        _subiendoPortada = false;
+      });
+    }
+  }
+}
+
+ 
+Future<void> _guardarPodcast() async {
+  if (_ocupado || _podcastYaGuardado) return;
+
+  if (!_formKey.currentState!.validate()) {
+    return;
+  }
+
+  final audioSeleccionado = _audioController.text.trim();
+  final portadaSeleccionada = _imagenController.text.trim();
+  final duracionTexto = _duracionController.text.trim();
+
+  final int? duracionSegundos = duracionTexto.isEmpty
+      ? null
+      : int.tryParse(duracionTexto);
+
+  setState(() {
+    _guardando = true;
+  });
+
+  try {
+    if (_esEdicion) {
+      await _podcastsService.actualizarPodcast(
+        id: widget.podcast!['id'].toString(),
+        titulo: _tituloController.text.trim(),
+        descripcion: _descripcionController.text.trim(),
+        audioUrl: audioSeleccionado,
+        imagenUrl: portadaSeleccionada,
+        duracionSegundos: duracionSegundos,
+        fechaPublicacion: _fechaPublicacion,
+        publicado: _publicado,
+      );
+      // Limpiar los archivos anteriores después de actualizar.
+final audioAnterior =
+    widget.podcast!['audio_url']?.toString() ?? '';
+
+final portadaAnterior =
+    widget.podcast!['imagen_url']?.toString() ?? '';
+
+try {
+  await _podcastsService.limpiarArchivosAnteriores(
+    audioAnterior: audioAnterior,
+    audioActual: audioSeleccionado,
+    portadaAnterior: portadaAnterior,
+    portadaActual: portadaSeleccionada,
+  );
+} catch (error) {
+  // La actualización ya se realizó correctamente.
+  // Un error de limpieza no debe provocar otro guardado.
+  debugPrint(
+    'Podcast actualizado, pero falló la limpieza anterior: $error',
+  );
+}
+    } else {
+      await _podcastsService.crearPodcast(
+        titulo: _tituloController.text.trim(),
+        descripcion: _descripcionController.text.trim(),
+        audioUrl: audioSeleccionado,
+        imagenUrl: portadaSeleccionada,
+        duracionSegundos: duracionSegundos,
+        fechaPublicacion: _fechaPublicacion,
+        publicado: _publicado,
+      );
+    }
+
+    // El registro ya fue guardado correctamente.
+    _podcastYaGuardado = true;
+
+    // Los archivos seleccionados ya no son temporales.
+    _audiosTemporales.remove(audioSeleccionado);
+    _portadasTemporales.remove(portadaSeleccionada);
+
+    // Limpiar archivos subidos pero no utilizados.
+    final erroresAudio = await _limpiarAudiosTemporales();
+    final erroresPortadas = await _limpiarPortadasTemporales();
+
+    final errores = [
+      ...erroresAudio,
+      ...erroresPortadas,
+    ];
+
+    if (!mounted) return;
+
+    if (errores.isNotEmpty) {
+      _mostrarMensaje(
+        'Podcast guardado correctamente, pero quedaron '
+        'archivos temporales pendientes de limpieza. '
+        'Presiona Cancelar para reintentar.',
+      );
       return;
     }
 
-    final audioSeleccionado =
-        _audioController.text.trim();
-
-    final duracionTexto =
-        _duracionController.text.trim();
-
-    final int? duracionSegundos =
-        duracionTexto.isEmpty
-            ? null
-            : int.tryParse(duracionTexto);
-
     setState(() {
-      _guardando = true;
+      _permitirSalida = true;
     });
 
-    try {
-      if (_esEdicion) {
-        await _podcastsService.actualizarPodcast(
-          id: widget.podcast!['id'].toString(),
-          titulo: _tituloController.text.trim(),
-          descripcion:
-              _descripcionController.text.trim(),
-          audioUrl: audioSeleccionado,
-          imagenUrl: _imagenController.text.trim(),
-          duracionSegundos: duracionSegundos,
-          fechaPublicacion: _fechaPublicacion,
-          publicado: _publicado,
-        );
-      } else {
-        await _podcastsService.crearPodcast(
-          titulo: _tituloController.text.trim(),
-          descripcion:
-              _descripcionController.text.trim(),
-          audioUrl: audioSeleccionado,
-          imagenUrl: _imagenController.text.trim(),
-          duracionSegundos: duracionSegundos,
-          fechaPublicacion: _fechaPublicacion,
-          publicado: _publicado,
-        );
-      }
-
-      // El podcast ya se guardó correctamente.
-      // Su MP3 seleccionado deja de ser temporal.
-      _audiosTemporales.remove(audioSeleccionado);
-
-      // Limpiar otros MP3 subidos en esta sesión
-      // que finalmente no fueron utilizados.
-      final errores = await _limpiarAudiosTemporales();
-
-      if (!mounted) return;
-
-      if (errores.isNotEmpty) {
-        _mostrarMensaje(
-          'Podcast guardado correctamente, pero '
-          'quedaron MP3 sin limpiar. '
-          'Puedes reintentar la limpieza al salir.',
-        );
-
-        setState(() {
-          _guardando = false;
-        });
-
-        return;
-      }
-
+    Navigator.of(context).pop(true);
+  } catch (error) {
+    _mostrarMensaje(
+      'No se pudo guardar el podcast: $error',
+    );
+  } finally {
+    if (mounted) {
       setState(() {
-        _permitirSalida = true;
+        _guardando = false;
       });
-
-      Navigator.of(context).pop(true);
-    } catch (error) {
-      _mostrarMensaje(
-        'No se pudo guardar el podcast: $error',
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _guardando = false;
-        });
-      }
     }
   }
+}
+
 
   @override
   Widget build(BuildContext context) {
@@ -492,6 +612,53 @@ class _PodcastFormScreenState extends State<PodcastFormScreen> {
               ),
 
               const SizedBox(height: 16),
+              const Text(
+  'Portada del podcast',
+  style: TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.bold,
+  ),
+),
+
+const SizedBox(height: 8),
+
+const Text(
+  'Selecciona una imagen JPG o PNG desde tu dispositivo, '
+  'o ingresa una URL de portada.',
+),
+
+const SizedBox(height: 14),
+
+OutlinedButton.icon(
+  onPressed: _ocupado ? null : _seleccionarPortada,
+  icon: _subiendoPortada
+      ? const SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+          ),
+        )
+      : const Icon(Icons.add_photo_alternate),
+  label: Text(
+    _subiendoPortada
+        ? 'Subiendo portada...'
+        : 'Seleccionar imagen de portada',
+  ),
+),
+
+if (_nombrePortadaSeleccionada != null) ...[
+  const SizedBox(height: 8),
+  Text(
+    'Imagen: $_nombrePortadaSeleccionada',
+    textAlign: TextAlign.center,
+    style: const TextStyle(
+      color: Color(0xFFFF4D9D),
+    ),
+  ),
+],
+
+const SizedBox(height: 16),
 
               TextFormField(
                 controller: _imagenController,
@@ -512,7 +679,34 @@ class _PodcastFormScreenState extends State<PodcastFormScreen> {
 
                   return null;
                 },
-              ),
+              ),const SizedBox(height: 12),
+
+ValueListenableBuilder<TextEditingValue>(
+  valueListenable: _imagenController,
+  builder: (context, valor, child) {
+    final imagenUrl = valor.text.trim();
+
+    if (!_urlValida(imagenUrl)) {
+      return const SizedBox.shrink();
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image.network(
+        imagenUrl,
+        height: 180,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return const Text(
+            'No se pudo mostrar la vista previa.',
+            textAlign: TextAlign.center,
+          );
+        },
+      ),
+    );
+  },
+),
 
               const SizedBox(height: 16),
 

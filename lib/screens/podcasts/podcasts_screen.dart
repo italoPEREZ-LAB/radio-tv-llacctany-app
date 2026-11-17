@@ -16,6 +16,42 @@ class _PodcastsScreenState extends State<PodcastsScreen> {
   final PodcastsService _podcastsService = PodcastsService();
   final AudioPlayerService _audioService =
       AudioPlayerService.instance;
+     String _formatearTiempo(Duration duracion) {
+  final horas = duracion.inHours;
+  final minutos = duracion.inMinutes.remainder(60);
+  final segundos = duracion.inSeconds.remainder(60);
+
+  String dosDigitos(int numero) =>
+      numero.toString().padLeft(2, '0');
+
+  if (horas > 0) {
+    return '$horas:${dosDigitos(minutos)}:${dosDigitos(segundos)}';
+  }
+
+  return '${dosDigitos(minutos)}:${dosDigitos(segundos)}';
+}
+
+Future<void> _moverPodcast(int segundos) async {
+  if (_audioService.isRadio ||
+      _player.audioSource == null) {
+    return;
+  }
+
+  final duracion = _player.duration;
+  if (duracion == null) return;
+
+  final nuevaPosicion =
+      _player.position + Duration(seconds: segundos);
+
+  final posicionSegura = Duration(
+    milliseconds: nuevaPosicion.inMilliseconds.clamp(
+      0,
+      duracion.inMilliseconds,
+    ),
+  );
+
+  await _player.seek(posicionSegura);
+} 
 
   late Future<List<Map<String, dynamic>>> _podcastsFuture;
 
@@ -65,8 +101,8 @@ class _PodcastsScreenState extends State<PodcastsScreen> {
     final minutos = (segundos % 3600) ~/ 60;
 
     if (horas > 0) {
-      return '$horas h ${minutos} min';
-    }
+  return '$horas h $minutos min';
+}
 
     if (minutos > 0) {
       return '$minutos min';
@@ -239,44 +275,118 @@ class _PodcastsScreenState extends State<PodcastsScreen> {
               ),
 
               if (esActual)
-                StreamBuilder<Duration>(
-                  stream: _player.positionStream,
-                  builder: (context, snapshot) {
-                    final posicion =
-                        snapshot.data ?? Duration.zero;
+  StreamBuilder<Duration?>(
+    stream: _player.durationStream,
+    builder: (context, durationSnapshot) {
+      final duracion = durationSnapshot.data;
 
-                    final duracion = _player.duration;
+      if (duracion == null ||
+          duracion.inMilliseconds <= 0) {
+        return const SizedBox.shrink();
+      }
 
-                    if (duracion == null ||
-                        duracion.inMilliseconds <= 0) {
-                      return const SizedBox.shrink();
-                    }
+      return StreamBuilder<Duration>(
+        stream: _player.positionStream,
+        builder: (context, positionSnapshot) {
+          final posicion =
+              positionSnapshot.data ?? Duration.zero;
 
-                    final maximo =
-                        duracion.inMilliseconds.toDouble();
+          final maximo =
+              duracion.inMilliseconds.toDouble();
 
-                    final valor = posicion.inMilliseconds
-                        .toDouble()
-                        .clamp(0.0, maximo);
+          final valor = posicion.inMilliseconds
+              .toDouble()
+              .clamp(0.0, maximo);
 
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                      ),
-                      child: Column(
-                        children: [
-                          LinearProgressIndicator(
-                            value: valor / maximo,
-                            backgroundColor:
-                                Colors.white24,
-                            color: const Color(0xFFFF4D9D),
-                          ),
-                          const SizedBox(height: 8),
-                        ],
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(
+              16, 0, 16, 16,
+            ),
+            child: Column(
+              children: [
+                Slider(
+                  value: valor,
+                  min: 0,
+                  max: maximo,
+                  activeColor: const Color(0xFFFF4D9D),
+                  inactiveColor: Colors.white24,
+                  onChanged: (nuevoValor) {
+                    _player.seek(
+                      Duration(
+                        milliseconds: nuevoValor.round(),
                       ),
                     );
                   },
                 ),
+
+                Row(
+                  mainAxisAlignment:
+                      MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _formatearTiempo(
+                        Duration(
+                          milliseconds: valor.round(),
+                        ),
+                      ),
+                    ),
+                    Text(_formatearTiempo(duracion)),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                Row(
+                  mainAxisAlignment:
+                      MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      tooltip: 'Retroceder 10 segundos',
+                      onPressed: () => _moverPodcast(-10),
+                      icon: const Icon(
+                        Icons.replay_10,
+                        size: 34,
+                        color: Colors.white,
+                      ),
+                    ),
+
+                    const SizedBox(width: 24),
+
+                    IconButton(
+                      tooltip: _player.playing
+                          ? 'Pausar'
+                          : 'Reproducir',
+                      onPressed: () =>
+                          _reproducirPodcast(podcast),
+                      icon: Icon(
+                        _player.playing
+                            ? Icons.pause_circle_filled
+                            : Icons.play_circle_fill,
+                        size: 52,
+                        color: const Color(0xFFFF4D9D),
+                      ),
+                    ),
+
+                    const SizedBox(width: 24),
+
+                    IconButton(
+                      tooltip: 'Adelantar 10 segundos',
+                      onPressed: () => _moverPodcast(10),
+                      icon: const Icon(
+                        Icons.forward_10,
+                        size: 34,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    },
+  ),
             ],
           ),
         );

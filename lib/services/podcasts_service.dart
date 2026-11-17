@@ -115,46 +115,60 @@ class PodcastsService {
   // ELIMINAR PODCAST Y SU AUDIO DE STORAGE
   // ============================================
 
-  Future<void> eliminarPodcast(String id) async {
-    const bucket = 'podcasts-audio';
+  // ============================================
+// ELIMINAR PODCAST, AUDIO Y PORTADA
+// ============================================
 
-    // Obtener el podcast antes de eliminarlo.
-    final podcast = await _supabase
-        .from('podcasts')
-        .select('id, audio_url')
-        .eq('id', id)
-        .single();
+Future<void> eliminarPodcast(String id) async {
+  // 1. Obtener los archivos asociados al podcast.
+  final podcast = await _supabase
+      .from('podcasts')
+      .select('id, audio_url, imagen_url')
+      .eq('id', id)
+      .single();
 
-    final audioUrl = podcast['audio_url']?.toString() ?? '';
+  final audioUrl = podcast['audio_url']?.toString() ?? '';
+  final imagenUrl = podcast['imagen_url']?.toString() ?? '';
 
-    // Identificar si el audio pertenece a nuestro Storage.
-    final rutaAudio = _obtenerRutaAudioStorage(audioUrl);
+  final rutaAudio = _obtenerRutaAudioStorage(audioUrl);
+  final rutaPortada = _obtenerRutaPortadaStorage(imagenUrl);
 
-    // Eliminar primero el registro de la base de datos.
-    await _supabase
-        .from('podcasts')
-        .delete()
-        .eq('id', id);
+  // 2. Eliminar el registro de la base de datos.
+  await _supabase
+      .from('podcasts')
+      .delete()
+      .eq('id', id);
 
-    // Si es una URL externa, no eliminamos ningún archivo.
-    if (rutaAudio == null) return;
-
-    // Comprobar si otros podcasts utilizan el mismo audio.
-    final referencias = await _supabase
+  // 3. Eliminar el MP3 si ningún otro podcast lo utiliza.
+  if (rutaAudio != null) {
+    final referenciasAudio = await _supabase
         .from('podcasts')
         .select('id')
         .eq('audio_url', audioUrl)
         .limit(1);
 
-    if (referencias.isNotEmpty) {
-      return;
+    if (referenciasAudio.isEmpty) {
+      await _supabase.storage
+          .from('podcasts-audio')
+          .remove([rutaAudio]);
     }
-
-    // Eliminar el MP3 de Supabase Storage.
-    await _supabase.storage
-        .from(bucket)
-        .remove([rutaAudio]);
   }
+
+  // 4. Eliminar la portada si ningún otro podcast la utiliza.
+  if (rutaPortada != null) {
+    final referenciasPortada = await _supabase
+        .from('podcasts')
+        .select('id')
+        .eq('imagen_url', imagenUrl)
+        .limit(1);
+
+    if (referenciasPortada.isEmpty) {
+      await _supabase.storage
+          .from('podcasts-portadas')
+          .remove([rutaPortada]);
+    }
+  }
+}
 
   // ============================================
   // IDENTIFICAR AUDIO DE NUESTRO STORAGE
@@ -197,6 +211,58 @@ class PodcastsService {
 
 
   // ============================================
+  // LIMPIAR ARCHIVOS ANTIGUOS DESPUÉS DE EDITAR
+  // ============================================
+
+  Future<void> limpiarArchivosAnteriores({
+    required String audioAnterior,
+    required String audioActual,
+    required String portadaAnterior,
+    required String portadaActual,
+  }) async {
+    // Limpiar el MP3 anterior si fue reemplazado.
+    if (audioAnterior.trim().isNotEmpty &&
+        audioAnterior.trim() != audioActual.trim()) {
+      final rutaAudio = _obtenerRutaAudioStorage(audioAnterior);
+
+      if (rutaAudio != null) {
+        final referencias = await _supabase
+            .from('podcasts')
+            .select('id')
+            .eq('audio_url', audioAnterior.trim())
+            .limit(1);
+
+        if (referencias.isEmpty) {
+          await _supabase.storage
+              .from('podcasts-audio')
+              .remove([rutaAudio]);
+        }
+      }
+    }
+
+    // Limpiar la portada anterior si fue reemplazada.
+    if (portadaAnterior.trim().isNotEmpty &&
+        portadaAnterior.trim() != portadaActual.trim()) {
+      final rutaPortada =
+          _obtenerRutaPortadaStorage(portadaAnterior);
+
+      if (rutaPortada != null) {
+        final referencias = await _supabase
+            .from('podcasts')
+            .select('id')
+            .eq('imagen_url', portadaAnterior.trim())
+            .limit(1);
+
+        if (referencias.isEmpty) {
+          await _supabase.storage
+              .from('podcasts-portadas')
+              .remove([rutaPortada]);
+        }
+      }
+    }
+  }
+
+  // ============================================
   // FORMATEAR FECHA PARA SUPABASE
   // ============================================
 
@@ -206,7 +272,46 @@ class PodcastsService {
     final dia = fecha.day.toString().padLeft(2, '0');
 
     return '$anio-$mes-$dia';
+  }// ============================================
+// IDENTIFICAR PORTADA DE NUESTRO STORAGE
+// ============================================
+
+String? _obtenerRutaPortadaStorage(String imagenUrl) {
+  final uri = Uri.tryParse(imagenUrl.trim());
+
+  if (uri == null || uri.scheme != 'https') {
+    return null;
   }
+
+  final supabaseUri = Uri.tryParse(_supabase.rest.url);
+
+  if (supabaseUri == null ||
+      uri.host != supabaseUri.host ||
+      uri.port != supabaseUri.port) {
+    return null;
+  }
+
+  const prefijo =
+      '/storage/v1/object/public/podcasts-portadas/';
+
+  if (!uri.path.startsWith(prefijo)) {
+    return null;
+  }
+
+  final ruta = uri.path.substring(prefijo.length);
+
+  if (ruta.isEmpty || !ruta.startsWith('imagenes/')) {
+    return null;
+  }
+
+  if (!ruta.toLowerCase().endsWith('.jpg') &&
+      !ruta.toLowerCase().endsWith('.jpeg') &&
+      !ruta.toLowerCase().endsWith('.png')) {
+    return null;
+  }
+
+  return Uri.decodeComponent(ruta);
+}
 
   // ============================================
   // NORMALIZAR CAMPOS OPCIONALES
